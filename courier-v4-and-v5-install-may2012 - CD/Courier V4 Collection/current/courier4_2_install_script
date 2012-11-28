@@ -1,0 +1,219 @@
+#!/bin/bash
+
+# This is the installation script for ISEEU Global Courier V4.2
+
+# Script Change Control:
+#     Script re-written from notes and install instructions as original misplaced - Working V4.2 Courier
+
+# Information:
+#     Courier Version     - 4.0
+#     Apache HTTP Version - 2.2.17
+#     PHP Version         - 5.3.6
+#     IonCube Software    - 5.3
+#     Operating System    - Red Hat Linux Enterprise Server 6.0
+
+
+# Variables Used in the Script
+# dnsname = This is the DNS name that Courier will be called and used for certificates
+# answer = This is used to break out of the script if 'n' is chosen to not edit config files.
+# answer2 = This is another yes or no request to choose to reboot the server now or not.
+
+
+# Main Script
+if [ $(id -u) !=0]; then
+     echo "You must be root to run this script" >&2
+     exit 1
+fi
+
+clear
+
+echo "First we add a customer disk encrption key for the LUKS system - 6 numeric characters"
+cryptsetup luksAddKey /dev/sda2
+cryptsetup luksDump /dev/sda2
+echo
+echo
+
+echo "Please enter the server's DNS host name: "
+read dnsname
+echo
+echo
+
+echo "Now starting and configuring mySQL"
+chkconfig --level 2345 mysqld on
+service mysqld start
+/usr/bin/mysql_secure_installation
+echo
+echo
+
+read -p "Next the script will move source files and unpack them - press return to continue"
+cd /home/iseeuglobal/Desktop/current/code
+cp httpd-2.2.17.tar.bz2 php-5.3.6.tar.bz2 /usr/local/src
+cd ..
+cd config_files
+cp config.layout /usr/local/src
+cd /usr/local/src
+chmod 777 *
+chown root:root *
+tar -xjvf httpd-2.2.17.tar.bz2 
+tar -xjvf php-5.3.6.tar.bz2
+echo
+echo
+
+read -p "Next the script will move the layout file and compile apache - press return to continue"
+cp config.layout ./httpd-2.2.17
+cd httpd-2.2.17
+./configure --enable-layout=AWT --with-mpm=prefork --enable-modules="rewrite so ssl speling"
+make
+make install
+
+clear
+read -p "Next the script will compile PHP and apply configuation file - press return to continue"
+cd ../php-5.3.6
+./configure --with-apxs2=/usr/sbin/apxs --with-mysql=/usr --with-zlib-dir=/usr
+make
+make install
+cd /home/iseeuglobal/Desktop/current
+cd config_files
+cp php.ini /usr/local/lib/php.ini
+chown root:root /usr/local/lib/php.ini
+chmod 644 /usr/local/lib/php.ini
+echo
+echo
+read -p "Next the script will move and unpack the Courier code - press return to continue"
+cd ..
+cd code
+cp courier40.tar /home/httpd/htdocs
+cd /home/httpd/htdocs
+tar -xvf courier40.tar 
+rm courier40.tar 
+cd global
+echo
+echo
+
+read -p "Next the script will create the blank database - press return to continue"
+cd /home/iseeuglobal/Desktop/current
+cd config_files
+mysql -uroot -p < courier40.sql
+echo
+echo
+
+read -p "Next the script will create the required directories - press return to continue"
+mkdir /home/upload
+mkdir /home/upload/courier40
+mkdir /home/upload/courier40/prestaged
+chown nobody:nobody /home/upload/courier40
+chown nobody:nobody /home/upload/courier40/prestaged
+chmod 750 /home/upload/courier40
+chmod 750 /home/upload/courier40/prestaged
+cd /home/httpd/htdocs/maint
+echo
+echo
+read -p "Next the script will copy all required configuration files - press return to continue"
+mv arc_courier4.php /etc/cron.daily
+cd /etc/cron.daily
+chmod 750 arc_courier4.php 
+chown root:root arc_courier4.php 
+cd /home/iseeuglobal/Desktop/current
+cd config_files
+cp httpd.conf /etc/httpd
+cp httpd-ssl.conf /etc/httpd/extra
+cp comodo.ca-bundle /etc/httpd/extra
+chmod 644 /etc/httpd/extra/comodo.ca-bundle
+echo
+echo
+
+read -p "Next the script will create a server key file - press return to continue"
+cd /etc/httpd
+cd extra
+openssl genrsa 2048 > $dnsname.key
+chmod 400 $dnsname.key
+echo
+echo
+
+read -p "Next the script will create a certificate request file - press return to continue"
+openssl req -new -key $dnsname.key -out $dnsname.csr
+openssl req -noout -text -in $dnsname.csr
+cat $dnsname.csr
+echo
+echo
+
+read -p "Next the server will generate a self signed certificate valid for 365 days - press return to continue"
+openssl x509 -req -days 365 -in $dnsname.csr -signkey $dnsname.key -out $dnsname.crt
+echo "Remember when editing the httpd-ssl.conf file to use the following names:"
+echo $dnsname.key
+echo $dnsname.crt
+echo "also change bundle file if required - set for Comodo currently"
+echo
+echo
+
+read -p "Next the script will install the IonCube Software as required - press return to continue"
+cd /usr/local
+mkdir ioncube
+cp /home/iseeuglobal/Desktop/current/config_files/ioncube_loader_lin_5.3.so /usr/local/ioncube/.
+echo
+echo
+
+read -p "Next the script will install the necessary GPG keys for gridcard upload - press return to continue"
+cd /home/httpd
+gpg --homedir /home/httpd/.gnupg --import /home/iseeuglobal/Desktop/current/config_files/gridcard.key
+chown -R nobody:nobody .gnupg
+chmod -R 400 .gnupg
+chmod 500 .gnupg
+echo
+echo
+
+read -p "Next the script will stop un-necessary services and clean up - press return to continue"
+cd /home/iseeuglobal/Desktop/current/
+cd cleanup_scripts/
+chmod 777 buffy-edited
+./buffy-edited 
+cd /etc/init.d
+chmod 755 httpd
+cd /home/httpd/htdocs
+rm ._*.*
+cd /usr/local/src
+rm -rf *
+echo
+echo
+
+clear
+echo "The installation is now complete.  The following configuration files need to be edited before the application will operate:"
+echo
+echo "ISEEU Global Courier Configuration - /home/httpd/htdocs/global/localcfg.inc"
+echo "SSL Certificate Configuration File - /etc/httpd/extra/httpd-ssl.conf"
+echo "Logwatch Configuration File - /usr/share/logwatch/default.conf/logwatch.conf"
+echo
+echo "Would you like to edit these files now? (y/n - choosing 'n' will complete the script and allow you to manually edit these files later.)"
+read answer
+if [ $answer = n ]; then exit 0
+fi
+
+read -p "Next the script will open the Courier configuration file for you to edit - press return to continue"
+vim /home/httpd/htdocs/global/localcfg.inc
+echo
+echo
+
+
+read -p "Next the script will open the SSL config for editing names - press return to continue"
+vim /etc/httpd/extra/httpd-ssl.conf
+echo
+echo
+
+read -p "Next the script will open the Logwatch configuration file - press return to continue"
+vim /usr/share/logwatch/default.conf/logwatch.conf
+echo
+echo
+
+# clear
+# echo "You will need to configure the http-ssl.conf file manually to match any new certificates installed post installation and is not performed during this install script."
+# echo
+# echo
+
+echo "The installation is now complete and the server will need to reboot before it will operate correctly.  Would you like to reboot the server now? y/n"
+read answer2
+if [ $answer2 = n ]; then exit 0
+fi
+
+shutdown -r now
+
+exit 0
