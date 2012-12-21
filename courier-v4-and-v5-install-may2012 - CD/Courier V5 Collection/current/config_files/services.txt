@@ -1,2 +1,0 @@
-syscom		8287/tcp		# ISEEU Global Courier command server
-syscom		8287/udp		# ISEEU Global Courier command server
